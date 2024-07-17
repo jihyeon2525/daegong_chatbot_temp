@@ -2,7 +2,7 @@ FROM python:3.12.2-slim
 
 WORKDIR /app
 
-COPY 대구공고전문.txt api_stream.py unstruct_step1.py requirements.txt vector/app/
+COPY 대구공고전문.txt api_stream.py unstruct_step1.py requirements.txt vector_db/app/
 
 RUN apt-get update && \
     apt-get install -y openjdk-17-jdk && \
