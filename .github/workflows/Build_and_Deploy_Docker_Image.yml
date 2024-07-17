@@ -37,7 +37,12 @@ jobs:
     - name: Push Docker image to GitHub Container Registry
       run: |
         docker push ghcr.io/jihyeon2525/daegong_chatbot:latest
-
+        
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
     - name: SSH into remote server and load Docker image
       uses: appleboy/ssh-action@master
       with:
@@ -46,6 +51,8 @@ jobs:
         password: ${{ secrets.REMOTE_PASS }}
         port: 22
         script: |
+          docker pull ghcr.io/jihyeon2525/daegong_chatbot:latest
+          docker save ghcr.io/jihyeon2525/daegong_chatbot:latest -o /home/knu_in2/daegong_chatbot.tar.gz
           docker load < /home/knu_in2/daegong_chatbot.tar.gz
           docker run -d -p 6677:6677 --name daegong_chatbot ghcr.io/jihyeon2525/daegong_chatbot:latest
       env:
