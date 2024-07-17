@@ -4,6 +4,11 @@ on:
   push:
     branches: [ "main" ]
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: jihyeon2525/daegong_chatbot:latest
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -43,17 +48,24 @@ jobs:
     needs: build
     
     steps:
-    - name: SSH into remote server and load Docker image
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.REMOTE_HOST }}
-        username: ${{ secrets.REMOTE_USER }}
-        password: ${{ secrets.REMOTE_PASS }}
-        port: 22
-        script: |
-          docker pull ghcr.io/jihyeon2525/daegong_chatbot:latest
-          docker save ghcr.io/jihyeon2525/daegong_chatbot:latest -o /home/knu_in2/daegong_chatbot.tar.gz
-          docker load < /home/knu_in2/daegong_chatbot.tar.gz
-          docker run -d -p 6677:6677 --name daegong_chatbot ghcr.io/jihyeon2525/daegong_chatbot:latest
-      env:
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    - name: Install SSH keys
+      run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa_chat
+          chmod 600 ~/.ssh/id_rsa_chat
+          ssh-keyscan ${{ secrets.SSH_HOST }} > ~/.ssh/known_hosts
+          
+    - name: Connect, Login, and Deploy
+      run: |
+        ssh ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} << 'EOF'
+          echo ${{ secrets.PAT }} | docker login ${{ env.REGISTRY }} -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          docker stop daegong_chatbot || true
+          docker rm daegong_chatbot || true
+          docker run -d --name daegong_chatbot -p 6677:6677 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          exit
+        EOF
+
+    - name: Cleanup
+      run: rm -rf ~/.ssh
+      
