@@ -5,7 +5,7 @@ WORKDIR /app
 COPY 대구공고전문.txt api_stream.py unstruct_step1.py requirements.txt vector_db /app/
 
 RUN apt-get update && \
-    apt-get install -y openjdk-17-jdk && \
+    apt-get install -y openjdk-17-jdk build-essential gcc libpq-dev && \
     apt-get clean
 
 ENV JAVA_HOME /usr/lib/jvm/java-17-openjdk-amd64
