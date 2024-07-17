@@ -3,8 +3,6 @@ name:  Build and Deploy Docker Image
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
 
 jobs:
   build:
@@ -13,6 +11,15 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v2
+
+    - name: Cache Docker layers
+      uses: actions/cache@v2
+      id: cache-docker
+      with:
+        path: /var/lib/docker
+        key: ${{ runner.os }}-docker-${{ hashFiles('**/Dockerfile') }}
+        restore-keys: |
+          ${{ runner.os }}-docker-
 
     - name: Set up Python
       uses: actions/setup-python@v2
