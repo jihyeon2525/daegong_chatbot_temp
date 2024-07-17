@@ -41,6 +41,7 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+          chmod 644 ~/.ssh/id_rsa.pub
           ssh-keyscan ${{ secrets.REMOTE_HOST }} > ~/.ssh/known_hosts
           
     - name: Connect, Login, and Deploy
