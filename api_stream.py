@@ -29,6 +29,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+load_dotenv()
 os.environ["OPENAI_API_KEY"] = os.getenv('OPENAI_API_KEY')
 
 if not os.path.exists('vector_db'):
@@ -54,8 +55,6 @@ splitted_docs = text_splitter.split_text(content)
 kbm25_retriever = KkmaBM25Retriever.from_texts(splitted_docs, k=3)
 embed_retriever = vector_db.as_retriever(search_type="similarity", search_kwargs={"k": 3})
 ensemble_retriever = EnsembleRetriever(retrievers=[kbm25_retriever, embed_retriever], weights=[0.4, 0.6])
-
-load_dotenv()
 
 class Message(BaseModel):
     content: str

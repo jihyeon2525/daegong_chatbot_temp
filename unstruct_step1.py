@@ -4,6 +4,9 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 import shutil
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Vec():
     def __init__(self):
