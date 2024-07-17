@@ -125,3 +125,4 @@ async def send_message(content: str) -> AsyncIterable[str]:
 async def stream_chat(message: Message):
     generator = send_message(message.content)
     return StreamingResponse(generator, media_type="text/event-stream")
+    
