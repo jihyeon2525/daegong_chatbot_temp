@@ -46,7 +46,7 @@ jobs:
         password: ${{ secrets.REMOTE_PASS }}
         port: 22
         script: |
-          docker pull ghcr.io/jihyeon2525/daegong_chatbot:latest
+          docker load < /home/knu_in2/daegong_chatbot.tar.gz
           docker run -d -p 6677:6677 --name daegong_chatbot ghcr.io/jihyeon2525/daegong_chatbot:latest
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
