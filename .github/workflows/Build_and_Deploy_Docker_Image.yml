@@ -1,4 +1,4 @@
-name:  Build and Deploy Docker Image
+name: Build and Deploy Docker Image
 
 on:
   push:
@@ -28,23 +28,17 @@ jobs:
 
     - name: Build Docker image
       run: |
-        docker build -t chatbot-app .
+        docker build -t ghcr.io/jihyeon2525/chatbot-app .
+        docker tag ghcr.io/jihyeon2525/chatbot-app ghcr.io/jihyeon2525/chatbot-app:latest
 
-    - name: Save Docker image to file
+    - name: Authenticate to GitHub Container Registry
+      run: echo "${{ secrets.PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+    - name: Push Docker image to GitHub Container Registry
       run: |
-        docker save chatbot-app | gzip > chatbot-app.tar.gz
+        docker push ghcr.io/jihyeon2525/chatbot-app:latest
 
-    - name: Copy Docker image to remote server
-      uses: appleboy/scp-action@v0.1.4
-      with:
-        host: ${{ secrets.REMOTE_HOST }}
-        username: ${{ secrets.REMOTE_USER }}
-        password: ${{ secrets.REMOTE_PASS }}
-        port: 22
-        source: "chatbot-app.tar.gz"
-        target: "/home/knu_in2/chatbot-app.tar.gz"
-
-    - name: SSH and load Docker image
+    - name: SSH into remote server and load Docker image
       uses: appleboy/ssh-action@master
       with:
         host: ${{ secrets.REMOTE_HOST }}
@@ -52,7 +46,7 @@ jobs:
         password: ${{ secrets.REMOTE_PASS }}
         port: 22
         script: |
-          docker load < /home/knu_in2/chatbot-app.tar.gz
-          docker run -d -p 6677:6677 --name chatbot-app chatbot-app
+          docker pull ghcr.io/jihyeon2525/chatbot-app:latest
+          docker run -d -p 6677:6677 --name chatbot-app ghcr.io/jihyeon2525/chatbot-app:latest
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
