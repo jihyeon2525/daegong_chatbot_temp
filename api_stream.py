@@ -1,23 +1,27 @@
-from unstruct_step1 import Vec
+from unstruct_step1 import Vec, documents
+
+from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from starlette.requests import Request
+from typing import AsyncIterable, Dict
+from pydantic import BaseModel
 import asyncio
-from typing import AsyncIterable
-from dotenv import load_dotenv
-from fastapi import FastAPI
-from langchain_community.document_loaders import TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from langchain_openai import ChatOpenAI
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
-from langchain_teddynote.retrievers import KkmaBM25Retriever
+from langchain_teddynote.retrievers import KiwiBM25Retriever
 from langchain.retrievers import EnsembleRetriever
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from langchain.callbacks import AsyncIteratorCallbackHandler
-from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from pydantic import BaseModel
-from konlpy.tag import Kkma
+from kiwipiepy import Kiwi
+
 from datetime import datetime
+from dotenv import load_dotenv
 import os
 
 app = FastAPI()
@@ -28,6 +32,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="static"), name = "static")
 
 load_dotenv()
 os.environ["OPENAI_API_KEY"] = os.getenv('OPENAI_API_KEY')
@@ -47,82 +54,156 @@ vector_db = Chroma(
     embedding_function = openai_embedding,
 )
 
-loader = TextLoader('대구공고전문.txt', encoding='utf-8')
-content = loader.load()[0].page_content
-text_splitter = RecursiveCharacterTextSplitter(chunk_size = 1500, chunk_overlap = 200, separators = '\n')
-splitted_docs = text_splitter.split_text(content)
+kiwi = Kiwi()
+def analyze_text(text):
+    nouns = []
+    key_nouns = []
+    particles = ['은', '는', '에', '이', '가', '의']
+    result = kiwi.analyze(text)
+    for token, pos, _, _ in result[0][0]:
+        if len(token) != 1 and pos in ['NNG', 'NNP', 'NR', 'XR', 'SL', 'SH', 'SN']:
+            nouns.append(token)
+        elif pos in ['JKS', 'JKB', 'JX', 'JKG'] and (token in particles) and nouns:
+            key_nouns.append(nouns[-1])
+    return nouns, key_nouns
 
-kbm25_retriever = KkmaBM25Retriever.from_texts(splitted_docs, k=3)
+kbm25_retriever = KiwiBM25Retriever.from_documents(documents, k=3)
 embed_retriever = vector_db.as_retriever(search_type="similarity", search_kwargs={"k": 3})
-ensemble_retriever = EnsembleRetriever(retrievers=[kbm25_retriever, embed_retriever], weights=[0.4, 0.6])
+ensemble_retriever = EnsembleRetriever(retrievers=[kbm25_retriever, embed_retriever], weights=[0.5, 0.5])
+
+global_chat_history = []
+if len(global_chat_history)>10:
+    global_chat_history.pop(0)
 
 class Message(BaseModel):
     content: str
+    chat_history: Dict[str, str]
 
 class NoDocumentsRetrievedError(Exception):
     pass
 
-chat_history = []
-async def send_message(content: str) -> AsyncIterable[str]:
+async def send_message(content: str, chat_history: Dict[str, str]) -> AsyncIterable[str]:
     try:
         callback = AsyncIteratorCallbackHandler()
-        
-        kkma = Kkma()
-        tok_query = kkma.nouns(content)
-        
-        docs = ensemble_retriever.invoke(' '.join(tok_query))
-        new_docs = list(doc.page_content for doc in docs)
-        
-        if not new_docs:
-          raise NoDocumentsRetrievedError("No documents retrieved.")
-        
+
+        tok_query, key_nouns = analyze_text(content)
+        if not key_nouns:
+            key_nouns = tok_query
+        if chat_history.get('question'):
+            if tok_query:
+                question = ' '.join(tok_query)
+                docs = ensemble_retriever.invoke(question)
+                new_docs = list(set(doc.page_content.replace('\t', ' ') for doc in docs))
+                if not new_docs:
+                    raise NoDocumentsRetrievedError("No documents retrieved.")
+                filtered_docs = "\n".join([f"<Doc{i+1}>. {d}" for i, d in enumerate(new_docs) if any(word in d for word in key_nouns)])
+                if len(filtered_docs) == 0:
+                    doc_scores = []
+                    for document in documents:
+                        page = document.page_content.replace('\t', ' ')
+                        keyword_count = sum(page.count(word) for word in key_nouns)
+                        if keyword_count > 0:
+                            doc_scores.append((page, keyword_count))
+                    doc_scores.sort(key=lambda x: x[1], reverse=True)
+                    filtered_docs_list = [doc for doc, _ in doc_scores[:5]]
+                    filtered_docs = "\n".join([f"<Doc{i+1}>. {d}" for i, d in enumerate(filtered_docs_list)])
+                history_text = f"Old Question: {chat_history.get('question', '')}"
+            else:
+                question = content
+                filtered_docs = 'None'
+                history_text = f"Old Question: {chat_history.get('question', '')}\nOld Data: {chat_history.get('docs', '')}"
+        else:
+            if tok_query:
+                question = ' '.join(tok_query)
+                docs = ensemble_retriever.invoke(question)
+                new_docs = list(set(doc.page_content.replace('\t', ' ') for doc in docs))
+                if not new_docs:
+                    raise NoDocumentsRetrievedError("No documents retrieved.")
+                filtered_docs = "\n".join([f"<Doc{i+1}>. {d}" for i, d in enumerate(new_docs) if any(word in d for word in key_nouns)])
+                if len(filtered_docs) == 0:
+                    doc_scores = []
+                    for document in documents:
+                        page = document.page_content.replace('\t', ' ')
+                        keyword_count = sum(page.count(word) for word in key_nouns)
+                        if keyword_count > 0:
+                            doc_scores.append((page, keyword_count))
+                    doc_scores.sort(key=lambda x: x[1], reverse=True)
+                    filtered_docs_list = [doc for doc, _ in doc_scores[:5]]
+                    filtered_docs = "\n".join([f"<Doc{i+1}>. {d}" for i, d in enumerate(filtered_docs_list)])
+                history_text = 'None'
+            else:
+                question = content
+                filtered_docs = 'None'
+                history_text = 'None'
+
         model = ChatOpenAI(
             streaming=True,
             verbose=True,
             callbacks=[callback],
+            temperature=0.1,
+            max_tokens=1500
         )
 
         year = datetime.now().year
-        history = "\n".join(f"Q: {item['question']}\nA: {item['answer']}" for item in chat_history[-2:])
-        #print(history)
         template = '''
-        너는 대구공업고등학교 총동문회 80년사 챗봇이야. 답변은 한국어 높임말로, '-습니다'를 활용한 어미를 사용해 일관되고 친절한 말투를 써.
-        제공받은 데이터와 관련된 질문만 답변해줘. 올해는 {year}년이야.
-        {context}
-        Chat history: {history}
-        Question: {question}
-        Answer:
+        이 챗봇은 대구공업고등학교 100년사 책의 내용과 관련된 질문에 답변하는 안내원입니다. 답변은 한국어 높임말을 사용합니다.
+        Read chat history to answer follow-up question.
+        이름 옆의 괄호 안 내용을 이용해 동명이인을 구별하고, 질문과 연관된 동명이인은 모두 답변합니다.
+        Answer the user's New Question using the following data. Individual docs may or may not be related to the question.
+        Don't make up the answer.
+        
+
+        Year: {year}
+        Chat history:
+        {history_text}
+        Data(fractions of book): {context}
+        New Question: {question}
+        New Answer:
         '''
 
         prompt = PromptTemplate(
-                    input_variables=[
-                        "context",
-                        "year",
-                        "question",
-                        "history"
-                    ],
-                    template=template
-                )
-        
+            input_variables=[
+                "year",
+                "context",
+                "question",
+                "history_text"
+            ],
+            template=template
+        )
+
         chain = prompt | model | StrOutputParser()
         
         task = asyncio.create_task(
-            chain.ainvoke({"year": year, "context": new_docs, "question": content, "history": history})
+            chain.ainvoke({"year": year, "context": filtered_docs, "question": content, "history_text": history_text})
         )
 
         async for token in callback.aiter():
             yield token
 
         response = await task
-        chat_history.append({"question": content, "answer": response})
+        chat_history['question'] = content
+        chat_history['docs'] = filtered_docs
+        global global_chat_history
+        global_chat_history.append(chat_history)
+        
     except Exception as e:
+        print(e)
         yield "죄송합니다. 지금은 답변해 드릴 수 없습니다."
-        print(f"Caught exception: {e}")
     finally:
         callback.done.set()
 
+@app.get("/", response_class=HTMLResponse)
+async def read_index(request: Request):
+    return templates.TemplateResponse("index.html", {"request":request})
+
 @app.post("/stream_chat/")
 async def stream_chat(message: Message):
-    generator = send_message(message.content)
+    generator = send_message(message.content, message.chat_history)
     return StreamingResponse(generator, media_type="text/event-stream")
-    
+
+@app.get("/get_chat_history/")
+async def get_chat_history(question: str = Query(..., description="The question to search for in chat history")):
+    for entry in global_chat_history:
+        if entry["question"] == question:
+            return JSONResponse(content=entry)
+    return JSONResponse(content={"question": "", "docs": ""}, status_code=404)
